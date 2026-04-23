@@ -284,7 +284,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return doc;
     };
 
-    viewReportBtn.addEventListener('click', () => {
+    const renderPdfToCanvas = async (arrayBuffer) => {
+        if (!window.pdfjsLib) throw new Error('pdfjsLib not loaded');
+        const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+        const container = document.createElement('div');
+        container.style.cssText = 'width:100%; max-height:80vh; overflow-y:auto; background:#525659; padding:10px; box-sizing:border-box;';
+
+        const containerWidth = previewContent.clientWidth - 20;
+
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            const page = await pdf.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 1 });
+            const scale = containerWidth / viewport.width;
+            const scaledViewport = page.getViewport({ scale: scale * (window.devicePixelRatio || 1) });
+
+            const canvas = document.createElement('canvas');
+            canvas.width = scaledViewport.width;
+            canvas.height = scaledViewport.height;
+            canvas.style.width = (scaledViewport.width / (window.devicePixelRatio || 1)) + 'px';
+            canvas.style.height = (scaledViewport.height / (window.devicePixelRatio || 1)) + 'px';
+            canvas.style.display = 'block';
+            canvas.style.margin = '0 auto 10px auto';
+            canvas.style.boxShadow = '0 2px 8px rgba(0,0,0,0.4)';
+
+            await page.render({ canvasContext: canvas.getContext('2d'), viewport: scaledViewport }).promise;
+            container.appendChild(canvas);
+        }
+
+        previewContent.innerHTML = '';
+        previewContent.appendChild(container);
+    };
+
+    viewReportBtn.addEventListener('click', async () => {
         const d = getFormData();
         if (!isComplete(d)) {
             alert('Mohon lengkapi semua kolom sebelum melihat pratinjau.');
@@ -299,15 +331,36 @@ document.addEventListener('DOMContentLoaded', () => {
         if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
         lastBlobUrl = URL.createObjectURL(blob);
 
-        previewContent.innerHTML = `
-            <iframe
-                src="${lastBlobUrl}#toolbar=1&navpanes=0&view=FitH"
-                style="width:100%; height:80vh; border:none; background:#525659;"
-                title="Pratinjau Laporan PDF">
-            </iframe>
-        `;
         reportPreview.style.display = 'block';
         exportPdfBtn.style.display = 'block';
+        previewContent.innerHTML = '<p style="color:#ddd; text-align:center; padding:20px;">Memuat pratinjau...</p>';
+
+        try {
+            const arrayBuffer = await blob.arrayBuffer();
+            await renderPdfToCanvas(arrayBuffer);
+        } catch (err) {
+            console.error('PDF.js render gagal, fallback ke iframe/tombol:', err);
+            const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+            if (isMobile) {
+                previewContent.innerHTML = `
+                    <div style="padding:20px; text-align:center;">
+                        <p style="color:#ddd; margin-bottom:12px;">Pratinjau tidak tersedia di perangkat ini.</p>
+                        <a href="${lastBlobUrl}" target="_blank" rel="noopener"
+                           style="display:inline-block; padding:10px 20px; background:#4a90e2; color:#fff; text-decoration:none; border-radius:5px;">
+                           Buka Laporan di Tab Baru
+                        </a>
+                    </div>
+                `;
+            } else {
+                previewContent.innerHTML = `
+                    <iframe
+                        src="${lastBlobUrl}#toolbar=1&navpanes=0&view=FitH"
+                        style="width:100%; height:80vh; border:none; background:#525659;"
+                        title="Pratinjau Laporan PDF">
+                    </iframe>
+                `;
+            }
+        }
     });
 
     exportPdfBtn.addEventListener('click', () => {
